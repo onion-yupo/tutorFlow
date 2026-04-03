@@ -28,6 +28,7 @@ const navigation = [
 
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
   const [sidebarSummary, viewer] = await Promise.all([getSidebarSummary(), getViewerContext()]);
+  const hasWorkspaceEntry = sidebarSummary.defaultWorkspaceHref !== "/dashboard";
 
   return (
     <div className="min-h-screen bg-transparent">
@@ -104,7 +105,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
         </aside>
 
         <div className="flex min-h-screen flex-1 flex-col gap-4">
-          <header className="workspace-card flex items-center justify-between px-5 py-4">
+          <header className="workspace-card relative z-10 flex items-center justify-between px-5 py-4">
             <div>
               <p className="text-sm text-muted-foreground">
                 TutorFlow / {viewer.isAdmin ? "管理员后台" : "老师后台"}
@@ -113,19 +114,25 @@ export default async function DashboardLayout({ children }: { children: ReactNod
                 {viewer.isAdmin ? "全局教学交付总览" : "我的班级教学总览"}
               </h2>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="relative z-20 flex items-center gap-3">
               <Link
                 href="/reports"
                 className="rounded-full border border-border/70 bg-white/80 px-4 py-2 text-sm font-medium transition hover:bg-secondary/80"
               >
                 查看学情报告
               </Link>
-              <Link
-                href={sidebarSummary.defaultWorkspaceHref}
-                className="rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90"
-              >
-                进入 AI Workspace
-              </Link>
+              {hasWorkspaceEntry ? (
+                <a
+                  href={sidebarSummary.defaultWorkspaceHref}
+                  className="rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90"
+                >
+                  进入 AI Workspace
+                </a>
+              ) : (
+                <span className="cursor-not-allowed rounded-full bg-primary/40 px-4 py-2 text-sm font-medium text-primary-foreground/80">
+                  暂无可进入的 Workspace
+                </span>
+              )}
             </div>
           </header>
 
