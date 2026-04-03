@@ -1,8 +1,39 @@
+import type { Prisma } from "@/lib/generated/prisma/client";
 import { db } from "@/lib/db";
 import { formatClock, mapDeliveryTaskStatusLabel, toPercent } from "@/lib/domain";
 import { getViewerPortalProgress } from "@/lib/portal-progress";
 import { buildDeliveryTaskScopeWhere, buildHomeworkScopeWhere, buildStudentScopeWhere } from "@/lib/viewer-scope";
 import { getViewerContext } from "@/lib/viewer";
+
+async function getDefaultWorkspaceRecordId(params: {
+  currentDayLabel: string;
+  homeworkScope?: Prisma.HomeworkRecordWhereInput;
+}) {
+  const currentDayRecord = await db.homeworkRecord.findFirst({
+    where: {
+      dayLabel: params.currentDayLabel,
+      ...(params.homeworkScope ?? {}),
+    },
+    orderBy: [{ submittedAt: "desc" }, { createdAt: "desc" }],
+    select: {
+      id: true,
+    },
+  });
+
+  if (currentDayRecord) {
+    return currentDayRecord.id;
+  }
+
+  const latestRecord = await db.homeworkRecord.findFirst({
+    where: params.homeworkScope ?? {},
+    orderBy: [{ submittedAt: "desc" }, { createdAt: "desc" }],
+    select: {
+      id: true,
+    },
+  });
+
+  return latestRecord?.id ?? null;
+}
 
 function getLatestGradingTask(
   deliveryTasks: Array<{
@@ -53,7 +84,7 @@ export async function getDashboardData() {
   const taskScope = buildDeliveryTaskScopeWhere(viewer);
   const portalProgress = await getViewerPortalProgress(viewer);
 
-  const [students, todayHomework, pendingTasks, recentTasks] = await Promise.all([
+  const [students, todayHomework, pendingTasks, recentTasks, defaultWorkspaceRecordId] = await Promise.all([
     db.student.findMany({
       where: studentScope,
       include: {
@@ -100,6 +131,10 @@ export async function getDashboardData() {
       orderBy: { updatedAt: "desc" },
       take: 6,
     }),
+    getDefaultWorkspaceRecordId({
+      currentDayLabel: portalProgress.currentDayLabel,
+      homeworkScope: homeworkScope ?? undefined,
+    }),
   ]);
 
   const activeStudents = students.filter((student) =>
@@ -142,7 +177,6 @@ export async function getDashboardData() {
     submittedHomework.length > 0
       ? submittedHomework.reduce((sum, record) => sum + (record.score ?? 0), 0) / submittedHomework.length
       : 0;
-  const defaultWorkspaceRecordId = todayHomework[0]?.id ?? null;
   const alerts = [
     ...failedHomework.map((record) => {
       const latestFailedTask = getLatestQueueFailureTask({
@@ -242,7 +276,7 @@ export async function getSidebarSummary() {
   const homeworkScope = buildHomeworkScopeWhere(viewer);
   const portalProgress = await getViewerPortalProgress(viewer);
 
-  const [pendingHomeworkCount, pendingContactCount, reviewDurations, firstRecord] = await Promise.all([
+  const [pendingHomeworkCount, pendingContactCount, reviewDurations, defaultWorkspaceRecordId] = await Promise.all([
     db.homeworkRecord.count({
       where: {
         ...(homeworkScope ?? {}),
@@ -269,15 +303,9 @@ export async function getSidebarSummary() {
         reviewedAt: true,
       },
     }),
-    db.homeworkRecord.findFirst({
-      where: {
-        dayLabel: portalProgress.currentDayLabel,
-        ...(homeworkScope ?? {}),
-      },
-      orderBy: [{ submittedAt: "desc" }, { createdAt: "desc" }],
-      select: {
-        id: true,
-      },
+    getDefaultWorkspaceRecordId({
+      currentDayLabel: portalProgress.currentDayLabel,
+      homeworkScope: homeworkScope ?? undefined,
     }),
   ]);
 
@@ -298,6 +326,6 @@ export async function getSidebarSummary() {
     pendingHomeworkCount,
     pendingContactCount,
     avgReviewMinutes,
-    defaultWorkspaceHref: firstRecord ? `/workspace/${firstRecord.id}` : "/dashboard",
+    defaultWorkspaceHref: defaultWorkspaceRecordId ? `/workspace/${defaultWorkspaceRecordId}` : "/dashboard",
   };
 }
