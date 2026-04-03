@@ -7,11 +7,13 @@
     "build": "next build",
     "start": "next start",
     "start:standalone": "node .next/standalone/server.js",
+    "prepare:standalone": "bash ./scripts/prepare-standalone.sh",
     "lint": "eslint",
     "local-feedback:smoke": "node --env-file=.env.local --import tsx scripts/local-feedback-smoke.ts",
     "tencent:question-mark:smoke": "node --env-file=.env.local --import tsx scripts/tencent-question-mark-smoke.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
     "db:seed": "prisma db seed"
   },

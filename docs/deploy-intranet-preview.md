@@ -45,19 +45,16 @@ GRANT ALL PRIVILEGES ON DATABASE tutorflow TO tutorflow;
 \q
 ```
 
-## 3. 上传项目
+## 3. 首次拉取项目
 
-把项目传到服务器，例如：
-
-```bash
-scp -r /本地路径/tutorFlow user@服务器IP:/srv/tutorflow
-```
-
-登录服务器后进入目录：
+推荐直接使用 Git：
 
 ```bash
+git clone git@github.com:onion-yupo/tutorFlow.git /srv/tutorflow
 cd /srv/tutorflow
 ```
+
+如果暂时不用 Git，也可以继续用打包上传方式。
 
 ## 4. 配置环境变量
 
@@ -90,20 +87,7 @@ LOCAL_FEEDBACK_API_TIMEOUT_MS="20000"
 ## 5. 安装并初始化项目
 
 ```bash
-npm install
-npm run db:generate
-npm run db:migrate
-npm run build
-```
-
-`standalone` 构建后，还需要把静态资源复制进去：
-
-```bash
-mkdir -p .next/standalone/.next
-rm -rf .next/standalone/.next/static
-cp -R .next/static .next/standalone/.next/static
-rm -rf .next/standalone/public
-cp -R public .next/standalone/public
+./scripts/deploy-preview.sh
 ```
 
 如果需要演示数据：
@@ -152,11 +136,7 @@ http://服务器内网IP:3000
 ```bash
 cd /srv/tutorflow
 git pull
-npm install
-npm run db:generate
-npm run db:migrate
-npm run build
-pm2 restart tutorflow-preview
+./scripts/deploy-preview.sh
 ```
 
 ## 9. 快速排查
