@@ -1,0 +1,588 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// 系统登录用户，当前阶段主要服务于老师与管理角色。
+model User {
+  id           String        @id @default(cuid())
+  email        String        @unique
+  name         String
+  phone        String?
+  role         UserRole      @default(TUTOR)
+  tutorProfile TutorProfile?
+  authIdentities AuthIdentity[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+/// 老师业务画像，承接人效、学科能力和作业处理记录。
+model TutorProfile {
+  id                String                   @id @default(cuid())
+  userId            String                   @unique
+  displayName       String
+  staffCode         String                   @unique
+  role              TutorRole                @default(HOMEROOM_TUTOR)
+  workloadCapacity  Int                      @default(150)
+  intro             String?
+  metadata          Json?
+  user              User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subjects          TutorSubjectAssignment[]
+  classAssignments  TutorClassAssignment[]
+  leadClasses       CampClass[]              @relation("LeadTutorClasses")
+  assignedStudents  Student[]                @relation("AssignedTutorStudents")
+  reviewedHomework  HomeworkRecord[]         @relation("HomeworkReviewedByTutor")
+  deliveryTasks     DeliveryTask[]
+  reportJobs        ReportJob[]
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+
+  @@index([role, workloadCapacity])
+}
+
+/// 学科中心表，用于支撑多学科、多学段扩展。
+model Subject {
+  id                 String                   @id @default(cuid())
+  code               String                   @unique
+  name               String
+  stage              String?
+  sortOrder          Int                      @default(0)
+  isActive           Boolean                  @default(true)
+  metadata           Json?
+  tutorAssignments   TutorSubjectAssignment[]
+  campClasses        CampClass[]
+  studentEnrollments StudentSubjectEnrollment[]
+  homeworkRecords    HomeworkRecord[]
+  materials          Material[]
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+
+  @@index([stage, sortOrder])
+}
+
+/// 老师和学科的多对多关系，支持一个老师负责多个学科/年级带宽。
+model TutorSubjectAssignment {
+  id         String       @id @default(cuid())
+  tutorId    String
+  subjectId  String
+  gradeBand  String?
+  isPrimary  Boolean      @default(false)
+  tutor      TutorProfile @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+  subject    Subject      @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  createdAt  DateTime     @default(now())
+
+  @@unique([tutorId, subjectId, gradeBand])
+  @@index([subjectId, gradeBand])
+}
+
+/// 学员主表，记录来源、家长信息和当前服务状态。
+model Student {
+  id               String                    @id @default(cuid())
+  uid              String                    @unique
+  displayName      String
+  parentName       String?
+  parentPhone      String
+  sourceChannel    String
+  status           StudentStatus             @default(LEAD_NEW)
+  gradeLevel       String
+  textbookVersion  String?
+  learningGoal     String?
+  assignedTutorId  String?
+  profileSnapshot  Json?
+  metadata         Json?
+  assignedTutor    TutorProfile?             @relation("AssignedTutorStudents", fields: [assignedTutorId], references: [id], onDelete: SetNull)
+  subjectEnrollments StudentSubjectEnrollment[]
+  homeworkRecords  HomeworkRecord[]
+  portalBindings   StudentPortalBinding[]
+  portalSessions   StudentPortalSession[]
+  deliveryTasks    DeliveryTask[]
+  reportArtifacts  ReportArtifact[]
+  reportJobs       ReportJob[]
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+
+  @@index([assignedTutorId, status])
+  @@index([sourceChannel, createdAt])
+}
+
+/// 第三方登录身份绑定，当前主要用于飞书登录。
+model AuthIdentity {
+  id               String       @id @default(cuid())
+  userId           String
+  provider         AuthProvider
+  providerUserId   String
+  unionId          String?
+  externalName     String?
+  metadata         Json?
+  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@unique([provider, providerUserId])
+  @@index([userId, provider])
+}
+
+/// 训练营班级，是老师查看数据范围和学员入口的核心实体。
+model CampClass {
+  id               String                 @id @default(cuid())
+  code             String                 @unique
+  name             String
+  campLabel        String
+  semesterLabel    String
+  gradeLevel       String
+  subjectId        String
+  leadTutorId      String?
+  isActive         Boolean                @default(true)
+  metadata         Json?
+  subject          Subject                @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  leadTutor        TutorProfile?          @relation("LeadTutorClasses", fields: [leadTutorId], references: [id], onDelete: SetNull)
+  tutorAssignments TutorClassAssignment[]
+  enrollments      StudentSubjectEnrollment[]
+  portals          SubmissionPortal[]
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  @@index([subjectId, campLabel, isActive])
+  @@index([leadTutorId, isActive])
+}
+
+/// 老师与班级的多对多关系，支撑普通老师看自己的班，管理员看全局。
+model TutorClassAssignment {
+  id         String              @id @default(cuid())
+  tutorId    String
+  classId    String
+  role       ClassAssignmentRole @default(LEAD)
+  tutor      TutorProfile        @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+  campClass  CampClass           @relation(fields: [classId], references: [id], onDelete: Cascade)
+  createdAt  DateTime            @default(now())
+
+  @@unique([tutorId, classId])
+  @@index([classId, role])
+}
+
+/// 学员在某个学科与学期内的在读关系，支撑定级和分班留痕。
+model StudentSubjectEnrollment {
+  id                 String            @id @default(cuid())
+  studentId          String
+  subjectId          String
+  classId            String?
+  campLabel          String?
+  semesterLabel      String
+  classCode          String?
+  classDisplayName   String?
+  placementScore     Int?
+  suggestedPlacement String?
+  finalPlacement     String?
+  isActive           Boolean           @default(true)
+  enrolledAt         DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  student            Student           @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  subject            Subject           @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  campClass          CampClass?        @relation(fields: [classId], references: [id], onDelete: SetNull)
+  homeworkRecords    HomeworkRecord[]
+
+  @@unique([studentId, subjectId, semesterLabel])
+  @@index([classId, isActive])
+  @@index([subjectId, semesterLabel, isActive])
+  @@index([studentId, isActive])
+}
+
+/// 每日作业主记录，是 AI Workspace 的主上下文实体。
+model HomeworkRecord {
+  id                 String                   @id @default(cuid())
+  studentId          String
+  tutorId            String?
+  subjectId          String
+  enrollmentId       String?
+  campLabel          String?
+  dayLabel           String
+  title              String
+  status             HomeworkStatus          @default(PENDING_REVIEW)
+  reviewStatus       HomeworkReviewStatus    @default(UNCHECKED)
+  feedbackStatus     HomeworkFeedbackStatus  @default(PENDING)
+  submissionChannel  SubmissionChannel       @default(FORM_LINK)
+  submissionLink     String?
+  submissionLinkToken String?                @unique
+  score              Int?
+  accuracyRate       Decimal?                @db.Decimal(5, 2)
+  correctCount       Int?
+  incorrectCount     Int?
+  aiSummary          Json?
+  feedbackDraft      String?
+  parentMessageDraft String?
+  reviewNotes        String?
+  submittedAt        DateTime?
+  reviewedAt         DateTime?
+  deliveredAt        DateTime?
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+  student            Student                 @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  tutor              TutorProfile?           @relation("HomeworkReviewedByTutor", fields: [tutorId], references: [id], onDelete: SetNull)
+  subject            Subject                 @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  enrollment         StudentSubjectEnrollment? @relation(fields: [enrollmentId], references: [id], onDelete: SetNull)
+  assets             HomeworkAsset[]
+  annotations        HomeworkAnnotation[]
+  deliveryTasks      DeliveryTask[]
+  reportArtifacts    ReportArtifact[]
+
+  @@index([studentId, createdAt])
+  @@index([tutorId, createdAt])
+  @@index([subjectId, createdAt])
+  @@index([status, submittedAt])
+  @@index([enrollmentId, createdAt])
+  @@unique([studentId, enrollmentId, dayLabel])
+}
+
+/// 作业多媒体资源，支持多图提交、反馈图与 H5 任务引用。
+model HomeworkAsset {
+  id               String            @id @default(cuid())
+  homeworkRecordId String
+  assetType        HomeworkAssetType @default(ORIGINAL_IMAGE)
+  pageIndex        Int               @default(0)
+  fileUrl          String
+  thumbnailUrl     String?
+  width            Int?
+  height           Int?
+  ocrPayload       Json?
+  metadata         Json?
+  createdAt        DateTime          @default(now())
+  homeworkRecord   HomeworkRecord    @relation(fields: [homeworkRecordId], references: [id], onDelete: Cascade)
+  annotations      HomeworkAnnotation[]
+
+  @@index([homeworkRecordId, pageIndex])
+  @@index([assetType, createdAt])
+}
+
+/// 批改痕迹与坐标层，支持 AI 自动批改与老师人工修正。
+model HomeworkAnnotation {
+  id               String         @id @default(cuid())
+  homeworkRecordId String
+  assetId          String?
+  annotationType   AnnotationType
+  pageIndex        Int            @default(0)
+  questionNumber   String?
+  label            String?
+  confidence       Decimal?       @db.Decimal(5, 2)
+  geometry         Json
+  isHidden         Boolean        @default(false)
+  correctedByTutor Boolean        @default(false)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  homeworkRecord   HomeworkRecord @relation(fields: [homeworkRecordId], references: [id], onDelete: Cascade)
+  asset            HomeworkAsset? @relation(fields: [assetId], references: [id], onDelete: SetNull)
+
+  @@index([homeworkRecordId, pageIndex])
+  @@index([assetId])
+  @@index([annotationType, isHidden])
+}
+
+/// 教学素材中心统一实体，覆盖课库、答案、H5 和加练题。
+model Material {
+  id               String                @id @default(cuid())
+  subjectId        String
+  type             MaterialType
+  status           MaterialStatus        @default(DRAFT)
+  practiceLevel    PracticeLevel?
+  campLabel        String?
+  semesterLabel    String?
+  dayLabel         String?
+  title            String
+  description      String?
+  fileUrl          String?
+  externalUrl      String?
+  previewQuestion  String?
+  previewAnswer    String?
+  previewOptions   Json?
+  usageCount       Int                   @default(0)
+  sortOrder        Int                   @default(0)
+  metadata         Json?
+  subject          Subject               @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  distribution     MaterialDistribution?
+  deliveryTasks    DeliveryTask[]
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+
+  @@index([subjectId, type, status])
+  @@index([campLabel, semesterLabel, dayLabel])
+}
+
+/// 素材分发配置，支持家长引导语和回传勾选项。
+model MaterialDistribution {
+  id             String    @id @default(cuid())
+  materialId     String    @unique
+  title          String
+  coverImageUrl  String?
+  guidanceText   String
+  trackDuration  Boolean   @default(false)
+  trackScore     Boolean   @default(false)
+  trackMistakes  Boolean   @default(false)
+  distributionNote String?
+  material       Material  @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+/// 站内动作流，承接提醒、草稿保存、发送反馈、分班、导出等可追踪任务。
+model DeliveryTask {
+  id               String             @id @default(cuid())
+  type             DeliveryTaskType
+  status           DeliveryTaskStatus @default(PENDING)
+  title            String
+  note             String?
+  actionUrl        String?
+  studentId        String?
+  tutorId          String?
+  homeworkRecordId String?
+  materialId       String?
+  reportJobId      String?
+  completedAt      DateTime?
+  student          Student?          @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  tutor            TutorProfile?     @relation(fields: [tutorId], references: [id], onDelete: SetNull)
+  homeworkRecord   HomeworkRecord?   @relation(fields: [homeworkRecordId], references: [id], onDelete: SetNull)
+  material         Material?         @relation(fields: [materialId], references: [id], onDelete: SetNull)
+  reportJob        ReportJob?        @relation(fields: [reportJobId], references: [id], onDelete: SetNull)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@index([status, createdAt])
+  @@index([studentId, status])
+  @@index([homeworkRecordId, type])
+}
+
+/// 班级通用提交入口，适合发到群里统一使用。
+model SubmissionPortal {
+  id               String                 @id @default(cuid())
+  classId          String
+  token            String                 @unique
+  title            String
+  description      String?
+  campStartDate    DateTime               @default(now())
+  campDays         Int                    @default(21)
+  activeDayLabel   String
+  isActive         Boolean                @default(true)
+  metadata         Json?
+  campClass        CampClass              @relation(fields: [classId], references: [id], onDelete: Cascade)
+  bindings         StudentPortalBinding[]
+  sessions         StudentPortalSession[]
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  @@index([classId, isActive])
+}
+
+/// 学生/家长首次进入班级入口时的绑定记录。
+model StudentPortalBinding {
+  id                  String                 @id @default(cuid())
+  studentId           String
+  portalId            String
+  phoneLast4          String
+  displayNameSnapshot String
+  wecomOpenId         String?
+  metadata            Json?
+  lastLoginAt         DateTime?
+  student             Student                @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  portal              SubmissionPortal       @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  sessions            StudentPortalSession[]
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+
+  @@unique([studentId, portalId])
+  @@index([portalId, phoneLast4])
+}
+
+/// 学生端免登录会话，覆盖整个 21 天训练营。
+model StudentPortalSession {
+  id            String               @id @default(cuid())
+  bindingId     String
+  studentId     String
+  portalId      String
+  sessionToken  String               @unique
+  expiresAt     DateTime
+  lastActiveAt  DateTime             @default(now())
+  binding       StudentPortalBinding @relation(fields: [bindingId], references: [id], onDelete: Cascade)
+  student       Student              @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  portal        SubmissionPortal     @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  @@index([studentId, expiresAt])
+  @@index([portalId, expiresAt])
+}
+
+/// 学情报告与成长视频等产物元数据。
+model ReportArtifact {
+  id               String             @id @default(cuid())
+  studentId        String
+  homeworkRecordId String?
+  artifactType     ReportArtifactType
+  title            String
+  summary          String?
+  fileUrl          String?
+  previewUrl       String?
+  subtitleText     String?
+  musicName        String?
+  metadata         Json?
+  student          Student            @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  homeworkRecord   HomeworkRecord?    @relation(fields: [homeworkRecordId], references: [id], onDelete: SetNull)
+  reportJobs       ReportJob[]
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  @@index([studentId, artifactType])
+}
+
+/// PDF、视频和导出打包任务。
+model ReportJob {
+  id                 String          @id @default(cuid())
+  studentId          String
+  tutorId            String?
+  artifactId         String?
+  type               ReportJobType
+  status             ReportJobStatus @default(PENDING)
+  title              String
+  message            String?
+  completedAt        DateTime?
+  student            Student         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  tutor              TutorProfile?   @relation(fields: [tutorId], references: [id], onDelete: SetNull)
+  artifact           ReportArtifact? @relation(fields: [artifactId], references: [id], onDelete: SetNull)
+  deliveryTasks      DeliveryTask[]
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  @@index([studentId, type, status])
+}
+
+enum UserRole {
+  ADMIN
+  TUTOR
+  LEAD
+}
+
+enum AuthProvider {
+  FEISHU
+}
+
+enum TutorRole {
+  HOMEROOM_TUTOR
+  SUBJECT_TUTOR
+  QA_REVIEWER
+  TEAM_LEAD
+}
+
+enum ClassAssignmentRole {
+  LEAD
+  ASSISTANT
+  REVIEWER
+}
+
+enum StudentStatus {
+  LEAD_NEW
+  WECHAT_ADDED
+  ASSESSING
+  PLACED
+  ACTIVE
+  COMPLETED
+}
+
+enum HomeworkStatus {
+  NOT_SUBMITTED
+  SUBMITTED
+  AI_REVIEWED
+  PENDING_REVIEW
+  READY_TO_DELIVER
+  DELIVERED
+}
+
+enum HomeworkReviewStatus {
+  UNCHECKED
+  CHECKED
+}
+
+enum HomeworkFeedbackStatus {
+  PENDING
+  SENT
+}
+
+enum SubmissionChannel {
+  FORM_LINK
+  WECHAT
+  H5
+  MANUAL_IMPORT
+}
+
+enum MaterialType {
+  COURSE_HOMEWORK
+  COURSE_ANSWER
+  H5_INTERACTIVE
+  PRACTICE_SET
+}
+
+enum MaterialStatus {
+  DRAFT
+  UPLOADED
+  PUBLISHED
+  ARCHIVED
+}
+
+enum PracticeLevel {
+  BASIC
+  CONSOLIDATION
+  CHALLENGE
+}
+
+enum HomeworkAssetType {
+  ORIGINAL_IMAGE
+  CORRECTED_IMAGE
+  FEEDBACK_CARD
+  PRACTICE_IMAGE
+  H5_LINK
+}
+
+enum AnnotationType {
+  CORRECT_MARK
+  ERROR_CIRCLE
+  HIGHLIGHT
+  COMMENT
+}
+
+enum DeliveryTaskType {
+  HOMEWORK_REMINDER
+  HOMEWORK_GRADING_RUN
+  SUBMISSION_LINK_GENERATED
+  FEEDBACK_DRAFT_SAVED
+  FEEDBACK_SENT
+  MATERIAL_DISTRIBUTED
+  PLACEMENT_CONFIRMED
+  PLACEMENT_ADJUSTED
+  REPORT_EXPORT
+}
+
+enum DeliveryTaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum ReportArtifactType {
+  PDF_REPORT
+  GROWTH_VIDEO
+}
+
+enum ReportJobType {
+  GENERATE_PDF
+  GENERATE_VIDEO
+  EXPORT_ALL
+}
+
+enum ReportJobStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}

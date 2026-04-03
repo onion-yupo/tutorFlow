@@ -1,0 +1,1 @@
+ALTER TYPE "DeliveryTaskStatus" ADD VALUE IF NOT EXISTS 'FAILED';
